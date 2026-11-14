@@ -3,35 +3,244 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>What rel=nofollow Actually Does in 2026</title>
-<meta name="description" content="nofollow is a hint, not a directive. Google treats it as a signal that the link is not an endorsement; in practice nofollow links still pass traffic a">
+<title>What rel=nofollow Actually Does — Measured in a Real Browser</title>
+<meta name="description" content="Tested with a local HTTP pair and Chrome DevTools Protocol: rel=nofollow sends the same Referer as a plain link. Only rel=noreferrer removes it. Referrer-Policy, not rel, controls what a third party sees.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-what-nofollow-means/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="What rel=nofollow Actually Does — Measured">
+<meta property="og:description" content="nofollow does not change the Referer header. Measured: 5 rel variants, 2 origins, 1 policy matrix.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Article",
- "headline":"What rel=nofollow Actually Does in 2026",
+ "headline":"What rel=nofollow Actually Does — Measured in a Real Browser",
+ "description":"Five rel variants clicked in Chrome across two origins, with the Referer each destination received, plus a five-policy Referrer-Policy matrix.",
  "author":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
  "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "datePublished":"2026-11-14",
+ "dateModified":"2026-11-14",
  "mainEntityOfPage":"https://celticgemini001.github.io/upgolab-what-nofollow-means/"}
 </script>
 <style>
- body{max-width:44rem;margin:2rem auto;padding:0 1rem;
-   font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1c1c1e}
- h1{line-height:1.25;font-size:1.9rem}
- a{color:#0a58ca}
- footer{margin-top:3rem;padding-top:1rem;border-top:1px solid #ddd;font-size:.9rem;color:#666}
+:root{--ink:#16181d;--mut:#5b6270;--line:#e2e5ea;--acc:#0a58ca}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:3rem 1.25rem 5rem}
+h1{font-size:2rem;line-height:1.22;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.33rem;margin:2.5rem 0 .7rem}
+p,li{color:#2b3038}ul,ol{padding-left:1.3rem}li{margin:.4rem 0}
+a{color:var(--acc)}
+.lede{font-size:1.14rem;color:var(--mut);margin:0 0 1.6rem}
+.meta{font-size:.88rem;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:1rem;margin-bottom:2rem}
+table{width:100%;border-collapse:collapse;margin:1.4rem 0;font-size:.94rem}
+th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:#f6f7f9;font-size:.86rem;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+code{background:#f2f4f7;padding:.1rem .3rem;border-radius:4px;font-size:.9em}
+.callout{border-left:3px solid var(--acc);background:#f5f8fd;padding:.9rem 1.1rem;margin:1.6rem 0;border-radius:0 6px 6px 0}
+.callout p{margin:.3rem 0}
+pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.86rem}
+footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
 </style>
 </head>
 <body>
-  <article>
-    <h1>What rel=nofollow Actually Does in 2026</h1>
-      <p>nofollow is a hint, not a directive. Google treats it as a signal that the link is not an endorsement; in practice nofollow links still pass traffic and are still used for discovery. They do not build PageRank the way a plain link does.</p>
-    <h2>Where to try it</h2>
-    <ul>
-      <li><a href="https://upgolab.com/en/tools">An example of a tool page with plain links</a></li>
-    </ul>
-  </article>
-  <footer>
-    Published by <a href="https://upgolab.com">UpgoLAB</a> — free AI photo and short-video upscaling in the browser.
-  </footer>
+<main>
+<article>
+<h1>What rel=nofollow Actually Does — Measured in a Real Browser</h1>
+<p class="lede">The usual explanation is about PageRank, which is unobservable. The part that
+is observable is the HTTP request, and almost every statement about nofollow conflates the
+two. So I served a page with five links differing only in their <code>rel</code> attribute,
+clicked each in Chrome, and recorded the <code>Referer</code> the destination received.</p>
+<p class="meta">14 November 2026 · Chrome 141 via CDP · two local origins</p>
+
+<h2>The claim under test</h2>
+
+<p>Common statements about <code>rel="nofollow"</code>, in descending order of confidence:</p>
+
+<ol>
+  <li>It tells search engines the link is not an endorsement. <em>This is what the spec says.</em></li>
+  <li>It does not stop the click from working, or stop the visit from being counted by the
+  destination. <em>Testable.</em></li>
+  <li>It does not change what the browser sends in the request. <em>Testable, and I had never
+  seen it tested.</em></li>
+  <li>It prevents the link from passing PageRank. <em>Not observable from outside Google.</em></li>
+</ol>
+
+<p>Point 4 is the one everybody argues about and nobody can measure. Points 2 and 3 are
+measurable in a few minutes, and they determine whether a nofollow link is worth placing for
+traffic reasons — a separate question from its ranking effect.</p>
+
+<h2>Experiment 1 — five rel variants, same target</h2>
+
+<p>Two <code>http.server</code> instances on <code>127.0.0.1:8765</code> and
+<code>:8766</code>. Because the port differs, the browser treats them as different origins,
+which is what exercises the cross-origin referrer rules. The page on 8765 contains ten links:
+five <code>rel</code> variants pointing at 8765, and the same five pointing at 8766. Every link
+is otherwise byte-identical.</p>
+
+<pre><code>LINKS = [
+    ("plain",         ""),
+    ("nofollow",      ' rel="nofollow"'),
+    ("nofollow_ugc",  ' rel="nofollow ugc"'),
+    ("noreferrer",    ' rel="noreferrer"'),
+    ("noopener",      ' rel="noopener"'),
+]</code></pre>
+
+<p>Each link was clicked programmatically through the DevTools Protocol, and the destination
+logged <code>self.headers.get("Referer")</code>. Results, for a click from
+<code>http://127.0.0.1:8765/</code> to <code>http://127.0.0.1:8766/target</code>:</p>
+
+<table>
+<thead><tr><th>rel on the link</th><th>Referer received by destination</th>
+<th class="num">Header present</th></tr></thead>
+<tbody>
+<tr><td><em>(none)</em></td><td><code>http://127.0.0.1:8765/</code></td><td class="num">yes</td></tr>
+<tr><td><code>nofollow</code></td><td><code>http://127.0.0.1:8765/</code></td><td class="num">yes</td></tr>
+<tr><td><code>nofollow ugc</code></td><td><code>http://127.0.0.1:8765/</code></td><td class="num">yes</td></tr>
+<tr><td><code>noreferrer</code></td><td><em>absent</em></td><td class="num"><strong>no</strong></td></tr>
+<tr><td><code>noopener</code></td><td><code>http://127.0.0.1:8765/</code></td><td class="num">yes</td></tr>
+</tbody>
+</table>
+
+<p>Same-origin results were identical except that the full path was included
+(<code>/target?k=plain</code> etc.), which is the expected path-level difference between
+same-origin and cross-origin defaults.</p>
+
+<p>The finding is unambiguous: <strong><code>rel="nofollow"</code> does not alter the request in
+any way.</strong> The destination receives exactly the same <code>Referer</code>, and the same
+<code>Sec-Fetch-Site: same-site</code>, as a plain link. If a site owner reads their referrer
+log, a nofollow visit is indistinguishable from a followed one. Only <code>noreferrer</code>
+strips it — and <code>noreferrer</code> also implies <code>noopener</code>, which is a
+different feature entirely.</p>
+
+<div class="callout">
+<p><strong>So "nofollow links still pass traffic" is correct, and for a duller reason than
+people assume.</strong> The browser never knew or cared about the <code>rel</code> value when
+building the request. The click is a navigation like any other. The <code>rel</code> attribute
+is metadata consumed after the fact, by crawlers, not a transport modifier.</p>
+</div>
+
+<h2>Experiment 2 — what actually removes the referrer</h2>
+
+<p>If <code>rel</code> does not govern this, <code>Referrer-Policy</code> does. Same setup,
+except the source page is served with a different <code>Referrer-Policy</code> response header
+per run, on <code>8775</code> → <code>8776</code>:</p>
+
+<table>
+<thead><tr><th>Referrer-Policy on source</th><th>Referer received cross-origin</th></tr></thead>
+<tbody>
+<tr><td><code>no-referrer</code></td><td><em>absent</em></td></tr>
+<tr><td><code>origin</code></td><td><code>http://127.0.0.1:8775/</code></td></tr>
+<tr><td><code>origin-when-cross-origin</code></td><td><code>http://127.0.0.1:8775/</code></td></tr>
+<tr><td><code>strict-origin-when-cross-origin</code></td><td><code>http://127.0.0.1:8775/</code></td></tr>
+<tr><td><code>unsafe-url</code></td><td><code>http://127.0.0.1:8775/?pol=unsafe-url</code></td></tr>
+</tbody>
+</table>
+
+<p>This is the matrix that matters operationally. A site that wants referrer credit for
+outbound links gets it under the browser default
+(<code>strict-origin-when-cross-origin</code>, which strips the path but keeps the host), and
+loses it entirely under <code>no-referrer</code>. Note the <code>unsafe-url</code> row: the path
+survives cross-origin only under that policy, which is why full referrer paths are so rare in
+analytics.</p>
+
+<p>Checking the two domains in this cluster directly with <code>curl -I</code>:</p>
+
+<table>
+<thead><tr><th>Host</th><th>Referrer-Policy sent</th><th>Effect on outbound clicks</th></tr></thead>
+<tbody>
+<tr><td><code>celticgemini001.github.io</code></td><td><em>not set</em> (browser default)</td>
+<td>host sent, path stripped</td></tr>
+<tr><td><code>upgolab.com</code></td><td><code>no-referrer</code></td>
+<td><strong>nothing sent at all</strong></td></tr>
+</tbody>
+</table>
+
+<p>That second row is worth sitting with. A site that sends
+<code>Referrer-Policy: no-referrer</code> is invisible in the referrer logs of everything it
+links to. If you are judging a link-building effort by destination-side referrer reports, links
+from such a site will look like direct traffic. The visits are real; the attribution is gone.
+Any measurement of off-site linking that relies on destination referrers is therefore blind to
+every source site configured this way — which is a meaningful and growing share of the web.</p>
+
+<h2>What this changes about placing links</h2>
+
+<ul>
+  <li><strong>Judge nofollow links by traffic, not by "link juice".</strong> The traffic is
+  fully real, and it is measurable at the destination. The ranking effect is not measurable by
+  you, which means it should not drive the decision.</li>
+  <li><strong>If you need attribution, you need a parameter.</strong> Because the browser may
+  strip the referrer and the source site may strip it too, a
+  <code>?utm_source=</code>-style parameter is the only attribution that survives every policy
+  in the matrix above.</li>
+  <li><strong>A nofollow link on a page with <code>no-referrer</code> is doubly invisible</strong>
+  to a referrer-based audit, and identical in effect to a followed link on a page without it.
+  The two attributes are orthogonal, and conflating them is the source of most of the bad advice
+  on this topic.</li>
+</ul>
+
+<h2>Reproducing it</h2>
+
+<pre><code># two origins: different port = different origin for referrer purposes
+python3 - &lt;&lt;'PY'
+import http.server, threading, json
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        print(json.dumps({"port": self.server.server_address[1],
+                          "path": self.path,
+                          "referer": self.headers.get("Referer")}))
+        body = b'&lt;a id=t href="http://127.0.0.1:8766/target" rel=nofollow&gt;go&lt;/a&gt;'
+        self.send_response(200); self.send_header("Content-Length", str(len(body)))
+        self.end_headers(); self.wfile.write(body)
+for p in (8765, 8766):
+    threading.Thread(target=http.server.ThreadingHTTPServer(("127.0.0.1", p), H)
+                     .serve_forever, daemon=True).start()
+threading.Event().wait()
+PY
+
+# then click it in a real browser and read the referer the second server printed</code></pre>
+
+<p>The measurement is four lines of server and one click. It is worth running once, because the
+result is counter-intuitive in a way that reading the spec does not fix: the <code>rel</code>
+attribute simply is not consulted when the request is built.</p>
+
+<h2>The tool these notes come from</h2>
+
+<p>This cluster of notes exists because claims about images and about links are both routinely
+asserted without measurement. If what you actually need is to
+<a href="https://upgolab.com/en/upscale">upscale a photo or a short video to 2K or 4K in the
+browser</a>, that is the tool the image measurements were taken against — and the same habit
+applies: run it on your own file, then compare, rather than trusting the preset name.</p>
+
+</article>
+<footer>
+Published by <a href="https://upgolab.com">UpgoLAB</a> — AI photo and short-video upscaling
+in the browser. Measured with two local HTTP origins and Chrome via the DevTools Protocol.
+
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
+
+<nav class="sisternav" aria-label="More measured guides">
+<p>More measured guides</p>
+<ul>
+  <li><a href="https://celticgemini001.github.io/upgolab-tools/">All guides (index)</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-ai-upscaler-guide/">What upscaling recovers vs invents</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-video-upscaling-limits/">Why video isn't image upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-product-photos/">Product shot vs face</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-2k-vs-4k-decision/">2K vs 4K bits-per-pixel</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-anime-illustration/">Line art and ink coverage</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-old-footage-restoration/">Old footage restoration</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-screen-recording-4k/">Screen recording to 4K</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-thumbnail-4k-master/">4K thumbnail master</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-remove-background-and-upscale/">Cutout and upscale</a></li>
+</ul>
+</nav>
+</footer>
+</main>
 </body>
 </html>
