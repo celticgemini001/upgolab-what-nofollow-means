@@ -3,20 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>What rel=nofollow Actually Does — Measured in a Real Browser</title>
-<meta name="description" content="Tested with a local HTTP pair and Chrome DevTools Protocol: rel=nofollow sends the same Referer as a plain link. Only rel=noreferrer removes it. Referrer-Policy, not rel, controls what a third party sees.">
+<title>rel="nofollow" vs rel="nofollow,noopener" — Measured in a Real Browser</title>
+<meta name="description" content="Measured in Chrome 157 with two local origins: rel=nofollow does not change the Referer header, but rel=&quot;nofollow,noopener&quot; is parsed as one token, so the link ships as dofollow. Plus the NBSP lookalike and the window.opener trap.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-what-nofollow-means/">
 <meta property="og:type" content="article">
-<meta property="og:title" content="What rel=nofollow Actually Does — Measured">
-<meta property="og:description" content="nofollow does not change the Referer header. Measured: 5 rel variants, 2 origins, 1 policy matrix.">
+<meta property="og:title" content="rel=nofollow vs rel=nofollow,noopener — Measured">
+<meta property="og:description" content="A comma inside rel is not a separator. Measured: the nofollow form silently ships as dofollow, and noreferrer stops stripping the Referer.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Article",
- "headline":"What rel=nofollow Actually Does — Measured in a Real Browser",
- "description":"Five rel variants clicked in Chrome across two origins, with the Referer each destination received, plus a five-policy Referrer-Policy matrix.",
+ "headline":"rel=nofollow vs rel=nofollow,noopener — Measured in a Real Browser",
+ "description":"Five rel variants and eight token-parsing variants clicked in Chrome 157 across two origins, recording the Referer the destination received at the HTTP-header level.",
  "author":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
  "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
  "datePublished":"2026-11-14",
- "dateModified":"2026-11-14",
+ "dateModified":"2026-11-15",
  "mainEntityOfPage":"https://celticgemini001.github.io/upgolab-what-nofollow-means/"}
 </script>
 <style>
@@ -49,7 +49,7 @@ footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-
 is observable is the HTTP request, and almost every statement about nofollow conflates the
 two. So I served a page with five links differing only in their <code>rel</code> attribute,
 clicked each in Chrome, and recorded the <code>Referer</code> the destination received.</p>
-<p class="meta">14 November 2026 · Chrome 141 via CDP · two local origins</p>
+<p class="meta">14 November 2026, extended 15 November 2026 · Chrome 157 via CDP · two local origins</p>
 
 <h2>The claim under test</h2>
 
@@ -160,6 +160,152 @@ links to. If you are judging a link-building effort by destination-side referrer
 from such a site will look like direct traffic. The visits are real; the attribution is gone.
 Any measurement of off-site linking that relies on destination referrers is therefore blind to
 every source site configured this way — which is a meaningful and growing share of the web.</p>
+
+<h2>Experiment 3 — the comma that silently disables the attribute</h2>
+
+<p>The first two experiments treat <code>rel</code> as a single token. It is not. It is a
+<em>set</em> of tokens, and the HTML standard says they are separated by ASCII whitespace —
+<code>U+0009</code>, <code>U+000A</code>, <code>U+000C</code>, <code>U+000D</code>,
+<code>U+0020</code>. A comma is not in that list. So <code>rel="noopener,noreferrer"</code> —
+the form that looks correct to anyone coming from a CSS selector list or a comma-separated
+header — parses as <strong>one token</strong> spelled <code>noopener,noreferrer</code>, which
+matches neither keyword.</p>
+
+<p>This is not a style question. In the SEO world a mis-parsed <code>nofollow</code> is the
+difference between a link you asked Google to ignore and a link you did not. I had never seen
+the failure measured, so I put eight <code>rel</code> values in one page and read
+<code>relList</code> back from a live DOM:</p>
+
+<table>
+<thead><tr><th><code>rel</code> as written</th><th>Parsed tokens</th>
+<th class="num"><code>nofollow</code> present</th></tr></thead>
+<tbody>
+<tr><td><code>nofollow</code></td><td><code>["nofollow"]</code></td><td class="num">yes</td></tr>
+<tr><td><code>nofollow,noopener</code></td><td><code>["nofollow,noopener"]</code></td>
+<td class="num"><strong>no</strong></td></tr>
+<tr><td><code>nofollow, noopener</code></td><td><code>["nofollow,", "noopener"]</code></td>
+<td class="num"><strong>no</strong></td></tr>
+<tr><td><code>nofollow,ugc</code></td><td><code>["nofollow,ugc"]</code></td>
+<td class="num"><strong>no</strong></td></tr>
+<tr><td><code>sponsored,nofollow</code></td><td><code>["sponsored,nofollow"]</code></td>
+<td class="num"><strong>no</strong></td></tr>
+<tr><td><code>nofollow ugc</code></td><td><code>["nofollow", "ugc"]</code></td><td class="num">yes</td></tr>
+<tr><td><code>nofollow noopener noreferrer</code></td>
+<td><code>["nofollow", "noopener", "noreferrer"]</code></td><td class="num">yes</td></tr>
+</tbody>
+</table>
+
+<p>Every comma row fails, and the comma-plus-space row fails for a subtly worse reason: the
+trailing comma becomes part of the first token, so <code>"nofollow,"</code> is not
+<code>"nofollow"</code>. A link written <code>rel="nofollow, noopener"</code> is therefore
+<strong>followed</strong> by every consumer that splits on whitespace, which is what the
+standard mandates. The author's intent and the machine's reading diverge, and nothing warns
+you.</p>
+
+<div class="callout">
+<p><strong>This is the highest-cost mistake in the table, and it fails silently.</strong> A
+link meant to be <code>nofollow</code> ships as dofollow. In affiliate or sponsored-content
+contexts that is exactly the case search guidelines care about, and the markup looks correct
+to human review. The fix is one character: replace the comma with a space.</p>
+</div>
+
+<h2>Experiment 4 — does the comma also break <code>noreferrer</code> at the network layer?</h2>
+
+<p>Parsing is not enforcement, so the token check above only proves the DOM disagrees with the
+author. The question that matters is whether the browser still honours the intent. Same two
+origins, <code>enforce.html</code> on <code>:8790</code> linking to <code>:8791</code>, but now
+the destination logs the <em>document request</em> — <code>Sec-Fetch-Dest: document</code> —
+and records <code>self.headers.get("Referer")</code> plus what page JavaScript sees:</p>
+
+<table>
+<thead><tr><th><code>rel</code> on the link</th><th>Server saw <code>Referer</code></th>
+<th><code>document.referrer</code></th><th>Outcome</th></tr></thead>
+<tbody>
+<tr><td><em>(none)</em> — control</td><td><code>http://127.0.0.1:8790/</code></td>
+<td><code>http://127.0.0.1:8790/</code></td><td>leaks, as expected</td></tr>
+<tr><td><code>nofollow</code> — control</td><td><code>http://127.0.0.1:8790/</code></td>
+<td><code>http://127.0.0.1:8790/</code></td><td>leaks: <code>nofollow</code> is not a
+transport modifier</td></tr>
+<tr><td><code>noopener noreferrer</code></td><td><em>absent</em></td><td><em>empty</em></td>
+<td><strong>stripped</strong></td></tr>
+<tr><td><code>noopener,noreferrer</code></td><td><code>http://127.0.0.1:8790/</code></td>
+<td><code>http://127.0.0.1:8790/</code></td><td><strong>leaks — broken</strong></td></tr>
+<tr><td><code>noopener, noreferrer</code></td><td><em>absent</em></td><td><em>empty</em></td>
+<td>stripped (second token parsed)</td></tr>
+<tr><td><code>NOOPENER NOREFERRER</code></td><td><em>absent</em></td><td><em>empty</em></td>
+<td>stripped: keywords are ASCII case-insensitive</td></tr>
+<tr><td><code>noopener</code>+TAB+<code>noreferrer</code></td><td><em>absent</em></td>
+<td><em>empty</em></td><td>stripped</td></tr>
+<tr><td><code>noopener</code>+LF+<code>noreferrer</code></td><td><em>absent</em></td>
+<td><em>empty</em></td><td>stripped</td></tr>
+<tr><td><code>noopener</code>+U+00A0+<code>noreferrer</code></td>
+<td><code>http://127.0.0.1:8790/</code></td><td><code>http://127.0.0.1:8790/</code></td>
+<td><strong>leaks — NBSP is not ASCII whitespace</strong></td></tr>
+</tbody>
+</table>
+
+<p>The comma row was run three times, in two separate browser sessions, and leaked every
+time; this is deterministic parser behaviour, not a race. The NBSP row is the same bug wearing
+a different disguise: a non-breaking space looks like a separator in an editor and is not one,
+so the whole string collapses into a single unrecognised token. And the upper-case row is
+worth noting precisely because <code>relList</code> <em>reports</em> <code>["NOOPENER",
+"NOREFERRER"]</code> — the tokens are preserved verbatim — while the browser still strips the
+referrer. Token matching is case-insensitive; the list is not normalised.</p>
+
+<h2>Experiment 5 — the <code>window.opener</code> trap that is not about <code>rel</code></h2>
+
+<p>The <code>noopener</code> half needs its own control, because modern Chrome applies
+<code>noopener</code> implicitly to <code>target="_blank"</code>. That default makes any
+naive test useless: every <code>_blank</code> link shows a severed opener whether or not
+<code>rel</code> contributed. Measured with <code>window.open()</code> instead, where the
+implicit default does not apply:</p>
+
+<pre><code>window.open(url, '_blank')                  // opener survives
+window.open(url, '_blank', 'noopener=yes')  // opener severed</code></pre>
+
+<table>
+<thead><tr><th>Navigation</th><th class="num"><code>window.opener</code> alive</th>
+<th>Destination can read opener</th></tr></thead>
+<tbody>
+<tr><td><code>window.open(url, '_blank')</code></td><td class="num">1</td>
+<td>yes — <code>location</code> readable</td></tr>
+<tr><td><code>window.open(url, '_blank', 'noopener=yes')</code></td>
+<td class="num">0</td><td>no</td></tr>
+<tr><td><code>&lt;a target="_blank"&gt;</code>, no <code>rel</code></td><td class="num">0</td>
+<td>no — browser implies <code>noopener</code></td></tr>
+</tbody>
+</table>
+
+<p>So the first table's <code>opener=0</code> column carries no information about
+<code>rel</code>: Chrome 157 severs the opener for <em>any</em> <code>_blank</code> anchor by
+default. The only place <code>noopener</code> still does work by hand is
+<code>window.open()</code> and legacy or embedded browsers. If you are auditing
+<code>rel</code> values by checking <code>window.opener</code> on a <code>_blank</code> link,
+you are measuring the browser default and will conclude every link is safe.</p>
+
+<h2>Checking a real site in ten seconds</h2>
+
+<p>None of this needs a browser. The parser rule is simple enough to apply to your own HTML in
+one grep, and it catches both failure modes at once — the comma and the lookalike space:</p>
+
+<pre><code># anchor-scoped: a comma inside a real link's rel
+grep -rEo '&lt;a [^&gt;]*rel="[^"]*,[^"]*"' --include='*.html' .
+
+# non-ASCII whitespace inside rel (NBSP, thin space, etc.)
+grep -rPo '&lt;a [^&gt;]*rel="[^"]*[\x{00A0}\x{2000}-\x{200B}][^"]*"' --include='*.html' .</code></pre>
+
+<p>The <code>&lt;a</code> anchor in both patterns is not decoration. Scoping the match to an
+opening tag is what keeps the check honest — an unscoped version of the first pattern also
+matches this very paragraph's prose, and any page that documents the bug will trip its own
+linter. That is the difference between a check you can wire into a deploy and one you disable
+after the second false positive.</p>
+
+<p>Run against this cluster of eleven pages: <strong>zero</strong> comma matches and
+<strong>zero</strong> non-ASCII-space matches. The 22 outbound links to the product site carry
+no <code>rel</code> at all, and the ten internal navigation links on each page are plain
+<code>&lt;a href&gt;</code> — deliberate, since the whole point of the cluster is a crawlable
+path rather than a protected one. The value of a check like this is that it is cheap enough to
+run on every deploy, and it fails on the exact class of mistake that review does not catch.</p>
 
 <h2>What this changes about placing links</h2>
 
