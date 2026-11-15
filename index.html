@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>rel="nofollow" vs rel="nofollow,noopener" — Measured in a Real Browser</title>
-<meta name="description" content="Measured in Chrome 157 with two local origins: rel=nofollow does not change the Referer header, but rel=&quot;nofollow,noopener&quot; is parsed as one token, so the link ships as dofollow. Plus the NBSP lookalike and the window.opener trap.">
+<meta name="description" content="Measured in Chrome 157 with two local origins: rel=nofollow does not change the Referer header, but rel=&quot;nofollow,noopener&quot; is parsed as one token, so the link ships as dofollow. Plus a 21-cell Referrer-Policy × same-origin/same-site/cross-site matrix, the NBSP lookalike, and the window.opener trap.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-what-nofollow-means/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="rel=nofollow vs rel=nofollow,noopener — Measured">
-<meta property="og:description" content="A comma inside rel is not a separator. Measured: the nofollow form silently ships as dofollow, and noreferrer stops stripping the Referer.">
+<meta property="og:description" content="A comma inside rel is not a separator. Measured: the nofollow form silently ships as dofollow, and noreferrer stops stripping the Referer. Twenty-one navigations across three site relationships.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Article",
  "headline":"rel=nofollow vs rel=nofollow,noopener — Measured in a Real Browser",
@@ -49,7 +49,7 @@ footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-
 is observable is the HTTP request, and almost every statement about nofollow conflates the
 two. So I served a page with five links differing only in their <code>rel</code> attribute,
 clicked each in Chrome, and recorded the <code>Referer</code> the destination received.</p>
-<p class="meta">14 November 2026, extended 15 November 2026 · Chrome 157 via CDP · two local origins</p>
+<p class="meta">14 November 2026, extended 15 November 2026 · Chrome 157 via CDP · up to five local origins, one per site relationship</p>
 
 <h2>The claim under test</h2>
 
@@ -283,6 +283,150 @@ default. The only place <code>noopener</code> still does work by hand is
 <code>rel</code> values by checking <code>window.opener</code> on a <code>_blank</code> link,
 you are measuring the browser default and will conclude every link is safe.</p>
 
+<h2>Experiment 6 — the tri-state the <code>Referer</code> header cannot tell you</h2>
+
+<p>Every table so far recorded one bit per click: the header arrived, or it did not. That bit
+is not what an attribution system needs. A destination asking "where did this visit come
+from" wants a host, a path, and a relationship — and it turns out the browser answers those
+three questions with two different mechanisms, one of which ignores
+<code>Referrer-Policy</code> entirely.</p>
+
+<p>Three relationships, built from loopback addresses rather than DNS, because the definition
+of "site" here is the registrable domain and loopback lets me control it exactly:</p>
+
+<ul>
+  <li><strong>same-origin</strong> — <code>127.0.0.1:8840</code> → <code>127.0.0.1:8840</code>.
+  Scheme, host and port all match.</li>
+  <li><strong>same-site</strong> — <code>127.0.0.1:8841</code> → <code>127.0.0.1:8842</code>.
+  Different origin, same site: the port is not part of a registrable domain.</li>
+  <li><strong>cross-site</strong> — <code>localhost:8843</code> →
+  <code>127.0.0.1:8844</code>. <code>localhost</code> and <code>127.0.0.1</code> are
+  different hosts, therefore different sites, even though they route to the same machine.</li>
+</ul>
+
+<p>Seven <code>Referrer-Policy</code> values, set as response headers on the source document,
+crossed with the three relationships: 21 real navigations, each a mouse click dispatched
+through the DevTools Protocol, each destination logging the headers it actually received.</p>
+
+<table>
+<thead><tr><th><code>Referrer-Policy</code> on source</th><th>same-origin</th>
+<th>same-site</th><th>cross-site</th></tr></thead>
+<tbody>
+<tr><td><em>(no header — default)</em></td><td>full URL + query</td>
+<td>origin only</td><td>origin only</td></tr>
+<tr><td><code>no-referrer</code></td><td colspan="3" style="text-align:center">
+<strong>absent in all three</strong></td></tr>
+<tr><td><code>origin</code></td><td>origin only</td><td>origin only</td><td>origin only</td></tr>
+<tr><td><code>origin-when-cross-origin</code></td><td>full URL + query</td>
+<td>origin only</td><td>origin only</td></tr>
+<tr><td><code>strict-origin-when-cross-origin</code></td><td>full URL + query</td>
+<td>origin only</td><td>origin only</td></tr>
+<tr><td><code>unsafe-url</code></td><td>full URL + query</td><td>full URL + query</td>
+<td>full URL + query</td></tr>
+<tr><td><code>same-origin</code></td><td>full URL + query</td>
+<td><strong>absent</strong></td><td><strong>absent</strong></td></tr>
+</tbody>
+</table>
+
+<p>The default is not "the referrer is sent". It is "the referrer is sent as an origin to
+anyone who is not byte-identical to you". A destination reading its referrer log under the
+browser default therefore recovers the <em>host</em> of the linking page and nothing else —
+no path, no query string. Across the 21 cells there are 11 distinct header values, and five
+of them are the empty set.</p>
+
+<p>Two rows are worth more than a glance. <code>origin-when-cross-origin</code> and
+<code>strict-origin-when-cross-origin</code> produced <strong>identical output in all three
+columns</strong> — nine cells, three distinct values, zero divergence. The <code>strict</code>
+prefix only changes behaviour in one case: an HTTPS source linking to a plaintext HTTP
+destination, where it withholds the header instead of downgrading it. For any pair of
+documents on the same scheme, the two policies are the same policy, so swapping one for the
+other is not a privacy improvement and does not change what your analytics sees.</p>
+
+<p>The <code>same-origin</code> row is the one that surprises people. It reads as "only send
+the referrer when the destination is me", and it does that, but it classifies
+<code>127.0.0.1:8841</code> → <code>127.0.0.1:8842</code> as <em>not me</em> and drops the
+header entirely. Origin and site are different partitions, and only the two policies with
+"cross-origin" in the name respect the wider one.</p>
+
+<h3>The second signal, which <code>Referrer-Policy</code> does not touch</h3>
+
+<p>All 21 requests also carried <code>Sec-Fetch-Site</code>, and it was populated in
+<strong>21 of 21</strong> — including the five requests that carried no
+<code>Referer</code> at all. So a destination that receives nothing still learns something
+precise:</p>
+
+<table>
+<thead><tr><th>What the destination received</th><th>Count</th><th>Still knowable</th></tr></thead>
+<tbody>
+<tr><td><code>Referer</code> header present</td><td class="num">16 / 21</td>
+<td>host, plus path if same-origin</td></tr>
+<tr><td><code>Sec-Fetch-Site</code> present</td><td class="num">21 / 21</td>
+<td>same-origin / same-site / cross-site, always</td></tr>
+<tr><td>Navigation context (<code>Sec-Fetch-Mode: navigate</code>,
+<code>Sec-Fetch-User: ?1</code>, <code>Sec-Fetch-Dest: document</code>)</td>
+<td class="num">21 / 21</td><td>it was a click, not a subresource fetch</td></tr>
+</tbody>
+</table>
+
+<p>That is the correction to the tidy story in the previous section. Setting
+<code>no-referrer</code> does not make a site invisible to the destinations it links to. Those
+destinations still see a cross-site, user-initiated document navigation and can log it as
+such. What they lose is the <em>identity</em> of the source — which is exactly the part an
+attribution report needs, and exactly the part a parameter survives.</p>
+
+<h3>Applying it to this cluster, honestly</h3>
+
+<p>This is not a hypothetical. The thirteen pages in this cluster are served from
+<code>celticgemini001.github.io</code>, which sends no <code>Referrer-Policy</code> header —
+checked with <code>curl -I</code>, not assumed — so the browser default applies. Every link
+from these pages to the product site is cross-site. By the table above, the product site's
+referrer log receives <code>https://celticgemini001.github.io/</code> and never the path.</p>
+
+<p>So I counted the links. Thirteen pages, all outbound links to the product host, and how
+many carry any attribution parameter:</p>
+
+<table>
+<thead><tr><th>Audit of the cluster</th><th class="num">Count</th></tr></thead>
+<tbody>
+<tr><td>Pages in the cluster</td><td class="num">13</td></tr>
+<tr><td>Outbound links to the product host</td><td class="num">24</td></tr>
+<tr><td>Links carrying a <code>utm_</code> parameter</td><td class="num"><strong>0</strong></td></tr>
+<tr><td>Links with a <code>rel</code> attribute at all</td><td class="num">0</td></tr>
+<tr><td>Distinct referrer values the product site can distinguish these 24 links by</td>
+<td class="num"><strong>1</strong></td></tr>
+</tbody>
+</table>
+
+<p>Twenty-four links resolve to one referrer row. If any of them converts, the report will say
+"celticgemini001.github.io" and stop there. And it is worse in the other direction: the
+product site itself sends <code>Referrer-Policy: no-referrer</code>, so its own outbound
+clicks are not attributed in anyone's log — real visits that will be filed as direct traffic
+everywhere they land.</p>
+
+<p>The fix costs one query string. The two links at the foot of this page now carry
+<code>utm_source</code> and <code>utm_medium</code>, because the measurement above says the
+header cannot do that job and pretending otherwise is how a link-building effort ends up with
+no data after three months of work.</p>
+
+<pre><code># which of your links can a referrer-based report actually distinguish?
+python3 - &lt;&lt;'PY'
+import glob, re
+hits = utm = 0
+for f in glob.glob('**/index.html', recursive=True):
+    h = open(f, encoding='utf-8').read()
+    for href in re.findall(r'&lt;a\s[^&gt;]*href="([^"]+)"', h):
+        if 'upgolab.com' in href:
+            hits += 1
+            utm += 'utm_' in href
+print(f'{hits} outbound links, {utm} distinguishable')
+PY</code></pre>
+
+<p>And to confirm the policy half without a browser, one header read per host:</p>
+
+<pre><code>for h in celticgemini001.github.io upgolab.com; do
+  printf '%-28s ' "$h"; curl -sSI "https://$h/" | grep -i '^referrer-policy' || echo '(none — browser default)'
+done</code></pre>
+
 <h2>Checking a real site in ten seconds</h2>
 
 <p>None of this needs a browser. The parser rule is simple enough to apply to your own HTML in
@@ -300,9 +444,9 @@ matches this very paragraph's prose, and any page that documents the bug will tr
 linter. That is the difference between a check you can wire into a deploy and one you disable
 after the second false positive.</p>
 
-<p>Run against this cluster of eleven pages: <strong>zero</strong> comma matches and
-<strong>zero</strong> non-ASCII-space matches. The 22 outbound links to the product site carry
-no <code>rel</code> at all, and the ten internal navigation links on each page are plain
+<p>Run against this cluster of thirteen pages: <strong>zero</strong> comma matches and
+<strong>zero</strong> non-ASCII-space matches. The 24 outbound links to the product site carry
+no <code>rel</code> at all, and the twelve internal navigation links on each page are plain
 <code>&lt;a href&gt;</code> — deliberate, since the whole point of the cluster is a crawlable
 path rather than a protected one. The value of a check like this is that it is cheap enough to
 run on every deploy, and it fails on the exact class of mistake that review does not catch.</p>
@@ -348,17 +492,18 @@ PY
 result is counter-intuitive in a way that reading the spec does not fix: the <code>rel</code>
 attribute simply is not consulted when the request is built.</p>
 
+
 <h2>The tool these notes come from</h2>
 
 <p>This cluster of notes exists because claims about images and about links are both routinely
 asserted without measurement. If what you actually need is to
-<a href="https://upgolab.com/en/upscale">upscale a photo or a short video to 2K or 4K in the
+<a href="https://upgolab.com/en/upscale?utm_source=githubpages&utm_medium=referral&utm_campaign=nofollow-notes">upscale a photo or a short video to 2K or 4K in the
 browser</a>, that is the tool the image measurements were taken against — and the same habit
 applies: run it on your own file, then compare, rather than trusting the preset name.</p>
 
 </article>
 <footer>
-Published by <a href="https://upgolab.com">UpgoLAB</a> — AI photo and short-video upscaling
+Published by <a href="https://upgolab.com?utm_source=githubpages&utm_medium=referral&utm_campaign=nofollow-notes">UpgoLAB</a> — AI photo and short-video upscaling
 in the browser. Measured with two local HTTP origins and Chrome via the DevTools Protocol.
 
 <style>
