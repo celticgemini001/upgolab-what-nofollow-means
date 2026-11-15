@@ -331,16 +331,24 @@ through the DevTools Protocol, each destination logging the headers it actually 
 <p>The default is not "the referrer is sent". It is "the referrer is sent as an origin to
 anyone who is not byte-identical to you". A destination reading its referrer log under the
 browser default therefore recovers the <em>host</em> of the linking page and nothing else —
-no path, no query string. Across the 21 cells there are 11 distinct header values, and five
-of them are the empty set.</p>
+no path, no query string.</p>
+
+<p>Count the cells by what a destination can actually recover, rather than by raw header
+string: <strong>21 cells collapse to three shapes</strong> — nothing, origin, or full path
+with query. The 21 log lines contain 11 distinct raw values only because every cell was
+loaded from a different source path, which is noise in this measurement, not signal. Five
+cells are the empty set.</p>
 
 <p>Two rows are worth more than a glance. <code>origin-when-cross-origin</code> and
-<code>strict-origin-when-cross-origin</code> produced <strong>identical output in all three
-columns</strong> — nine cells, three distinct values, zero divergence. The <code>strict</code>
-prefix only changes behaviour in one case: an HTTPS source linking to a plaintext HTTP
-destination, where it withholds the header instead of downgrading it. For any pair of
-documents on the same scheme, the two policies are the same policy, so swapping one for the
-other is not a privacy improvement and does not change what your analytics sees.</p>
+<code>strict-origin-when-cross-origin</code> produced the <strong>same shape in all three
+columns</strong> — full, origin, origin — zero divergence across nine cells. Their raw header
+strings differ only in the source path, which is expected: each policy was served from its own
+URL. The <code>strict</code> prefix changes behaviour in exactly one case, and my matrix does
+not exercise it: an HTTPS source linking to a plaintext HTTP destination, where it withholds
+the header instead of downgrading it. For any pair of documents on the same scheme the two
+policies are the same policy, so swapping one for the other is not a privacy improvement and
+does not change what analytics sees. The honest limit of this section is that the
+scheme-downgrade case is asserted from the spec, not measured here.</p>
 
 <p>The <code>same-origin</code> row is the one that surprises people. It reads as "only send
 the referrer when the destination is me", and it does that, but it classifies
@@ -383,21 +391,28 @@ from these pages to the product site is cross-site. By the table above, the prod
 referrer log receives <code>https://celticgemini001.github.io/</code> and never the path.</p>
 
 <p>So I counted the links. Thirteen pages, all outbound links to the product host, and how
-many carry any attribution parameter:</p>
+many carry any attribution parameter — measured before and after the two links on this page
+were fixed:</p>
 
 <table>
-<thead><tr><th>Audit of the cluster</th><th class="num">Count</th></tr></thead>
+<thead><tr><th>Audit of the cluster</th><th class="num">Before</th><th class="num">After</th></tr></thead>
 <tbody>
-<tr><td>Pages in the cluster</td><td class="num">13</td></tr>
-<tr><td>Outbound links to the product host</td><td class="num">24</td></tr>
-<tr><td>Links carrying a <code>utm_</code> parameter</td><td class="num"><strong>0</strong></td></tr>
-<tr><td>Links with a <code>rel</code> attribute at all</td><td class="num">0</td></tr>
-<tr><td>Distinct referrer values the product site can distinguish these 24 links by</td>
-<td class="num"><strong>1</strong></td></tr>
+<tr><td>Pages in the cluster</td><td class="num">13</td><td class="num">13</td></tr>
+<tr><td>Outbound links to the product host</td><td class="num">24</td><td class="num">24</td></tr>
+<tr><td>Links carrying a <code>utm_</code> parameter</td><td class="num"><strong>0</strong></td>
+<td class="num">2</td></tr>
+<tr><td>Links with a <code>rel</code> attribute at all</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><td>Distinct referrer values the product site can distinguish them by</td>
+<td class="num"><strong>1</strong></td><td class="num">2</td></tr>
 </tbody>
 </table>
 
-<p>Twenty-four links resolve to one referrer row. If any of them converts, the report will say
+<p>Two of twenty-four is not a fix, it is a demonstration. The other twelve pages still
+resolve to one referrer row, and the honest reading of that column is that this cluster is
+not yet measurable, not that it is measured.</p>
+
+<p>Twenty-two of the twenty-four links still resolve to one referrer row. If any of them
+converts, the report will say
 "celticgemini001.github.io" and stop there. And it is worse in the other direction: the
 product site itself sends <code>Referrer-Policy: no-referrer</code>, so its own outbound
 clicks are not attributed in anyone's log — real visits that will be filed as direct traffic
