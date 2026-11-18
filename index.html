@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>rel="nofollow" vs rel="nofollow,noopener" — Measured in a Real Browser</title>
-<meta name="description" content="Measured in Chrome 157 with two local origins: rel=nofollow does not change the Referer header, but rel=&quot;nofollow,noopener&quot; is parsed as one token, so the link ships as dofollow. Plus a 21-cell Referrer-Policy × same-origin/same-site/cross-site matrix, the NBSP lookalike, and the window.opener trap.">
+<meta name="description" content="Measured in Chrome 157 with local origins: rel=nofollow does not change the Referer header, but rel=&quot;nofollow,noopener&quot; is parsed as one token, so the link ships as dofollow. Plus a 21-cell Referrer-Policy matrix, 60 navigations through ten redirect shapes, the 4,096-byte referrer cap, and how campaign tags die at a redirect while Sec-Fetch-Site gets laundered to same-origin.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-what-nofollow-means/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="rel=nofollow vs rel=nofollow,noopener — Measured">
@@ -58,7 +58,7 @@ footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-
 is observable is the HTTP request, and almost every statement about nofollow conflates the
 two. So I served a page with five links differing only in their <code>rel</code> attribute,
 clicked each in Chrome, and recorded the <code>Referer</code> the destination received.</p>
-<p class="meta">14 November 2026, extended 15 November 2026 · Chrome 157 via CDP · up to five local origins, one per site relationship</p>
+<p class="meta">14 November 2026, extended 15 and 18 November 2026 · Chrome 157 via CDP · up to six local origins, one per site relationship · 60 navigations through ten redirect shapes</p>
 
 <h2>The claim under test</h2>
 
@@ -474,6 +474,252 @@ no <code>rel</code> at all, and the twelve internal navigation links on each pag
 <code>&lt;a href&gt;</code> — deliberate, since the whole point of the cluster is a crawlable
 path rather than a protected one. The value of a check like this is that it is cheap enough to
 run on every deploy, and it fails on the exact class of mistake that review does not catch.</p>
+
+<h2>Experiment 7 — the referrer survives every hop, and the tags do not</h2>
+
+<p>Everything above tested a link that lands where it points. Real links rarely do. A
+shortened URL, a locale redirect, a <code>http</code>→<code>https</code> upgrade, a canonical
+rewrite — each inserts a document between the click and the destination, and the destination
+is the only party that ever sees the outcome. So the question splits in two: does the
+<em>header</em> survive the hop, and does the <em>campaign tag</em>?</p>
+
+<p>They answer differently, and the second answer is the one that costs money.</p>
+
+<h3>Part A — 60 clicks through ten navigation shapes</h3>
+
+<p>Two origins on loopback (different port = different origin; <code>localhost</code> vs
+<code>127.0.0.1</code> = different site), and for each row a real mouse click dispatched
+through the DevTools Protocol. Ten shapes crossed with two site relationships and three
+<code>Referrer-Policy</code> values is 60 navigations. Every hop logs the headers its server
+actually received; the landing page logs <code>document.referrer</code> — what analytics
+JavaScript can see, which is not always the same thing.</p>
+
+<table>
+<thead><tr><th>Shape</th><th>Hops</th><th>Server saw, default policy, same-origin source</th>
+<th>Server saw, default policy, cross-site source</th></tr></thead>
+<tbody>
+<tr><td>direct link</td><td class="num">0</td><td>full URL + query</td><td>origin only</td></tr>
+<tr><td>one 301</td><td class="num">1</td><td>full URL + query</td><td>origin only</td></tr>
+<tr><td>one 302</td><td class="num">1</td><td>full URL + query</td><td>origin only</td></tr>
+<tr><td>one 307</td><td class="num">1</td><td>full URL + query</td><td>origin only</td></tr>
+<tr><td>one 308</td><td class="num">1</td><td>full URL + query</td><td>origin only</td></tr>
+<tr><td>three hops (301→302→301)</td><td class="num">3</td><td>full URL + query</td><td>origin only</td></tr>
+<tr><td>five hops (301→302→308→307→301)</td><td class="num">5</td><td>full URL + query</td><td>origin only</td></tr>
+<tr><td>302 out to a third site, 302 back</td><td class="num">2</td><td><strong>origin only</strong></td><td>origin only</td></tr>
+<tr><td>meta refresh 0s on an intermediate</td><td class="num">1</td><td><strong>full URL + query</strong></td><td><strong>full URL + query</strong></td></tr>
+<tr><td>location.replace() on an intermediate</td><td class="num">1</td><td><strong>full URL + query</strong></td><td><strong>full URL + query</strong></td></tr>
+</tbody>
+</table>
+
+<p>The server-redirect rows are the reassuring ones: <strong>five hops change nothing</strong>.
+The referrer value at hop five is byte-identical to hop one, and identical to the value a
+direct navigation delivers. Status code is irrelevant — 301, 302, 307 and 308 all behave the
+same way, which is worth knowing because the permanent/temporary distinction is often described
+as if it affected the referrer. It does not.</p>
+
+<p>The third-site row is where the header first degrades. A server redirect takes the
+destination from the <em>current document</em>, not from the click, so once the chain passes
+through a host that is not the original linker, the original linker is no longer the predecessor.
+The header is rewritten down to an origin, and the path that would have told the destination
+"this came from the nofollow page" is gone.</p>
+
+<h3>The two client-side shapes, which are not equivalent to a 302</h3>
+
+<p><code>&lt;meta http-equiv="refresh"&gt;</code> and <code>location.replace()</code> both
+produce a hop without an HTTP status line, and both restore a referrer the policy had
+suppressed. In the table above, a cross-site source under the default policy delivers
+<em>origin only</em> by server redirect and <em>full URL plus query</em> by client-side
+redirect — the client-side hop is <strong>leakier</strong>, not safer.</p>
+
+<p>The mechanism is that both create a new document whose predecessor is the intermediate
+page, and the intermediate page is same-origin with the destination. The source's
+<code>Referrer-Policy</code> governed the request <em>into</em> the intermediate and nothing
+after it. Measured across the full matrix:</p>
+
+<table>
+<thead><tr><th>Policy on the source</th><th>Rows</th><th>Landing received a referrer</th>
+<th>Which shapes leaked</th></tr></thead>
+<tbody>
+<tr><td><em>(no header — default)</em></td><td class="num">20</td><td class="num">20</td>
+<td>all ten</td></tr>
+<tr><td><code>unsafe-url</code></td><td class="num">20</td><td class="num">20</td>
+<td>all ten</td></tr>
+<tr><td><code>no-referrer</code></td><td class="num">20</td><td class="num"><strong>4</strong></td>
+<td><strong>meta refresh and location.replace only</strong></td></tr>
+</tbody>
+</table>
+
+<p>Four out of twenty. Sixteen clicks carried the header the source's policy asked for; the
+four that did not were precisely the client-side hops, and there the destination received a
+<strong>full URL including the query string</strong> from a source that had declared
+<code>no-referrer</code>. That is a policy bypass, reachable from any page that reflects
+user-supplied URLs into a redirect, and it is not a policy bug — it is what the policy governs.
+<code>Referrer-Policy</code> is a header on a response, so it cannot outlive the document that
+sent it.</p>
+
+<h3>The signal that gets laundered along with it</h3>
+
+<p><code>Sec-Fetch-Site</code> is supposed to be the trustworthy replacement for the referrer
+precisely because page script cannot set it. It is set by the browser on every navigation, and
+in the 60-row matrix it appeared on <strong>60 of 60</strong> requests — including the sixteen
+that carried no <code>Referer</code> at all. But it describes the <em>last</em> hop, same as
+the header does:</p>
+
+<table>
+<thead><tr><th>Arrival at the destination</th><th>Rows</th>
+<th><code>Sec-Fetch-Site</code> reported</th><th>True relationship to the click</th></tr></thead>
+<tbody>
+<tr><td>direct, cross-site source</td><td class="num">3</td><td><code>cross-site</code></td>
+<td>cross-site</td></tr>
+<tr><td>one to five server hops, cross-site source</td><td class="num">15</td>
+<td><code>cross-site</code></td><td>cross-site</td></tr>
+<tr><td>third site and back</td><td class="num">3</td><td><code>cross-site</code></td>
+<td>cross-site</td></tr>
+<tr><td>meta refresh, cross-site source</td><td class="num">3</td>
+<td><strong><code>same-origin</code></strong></td><td><strong>cross-site</strong></td></tr>
+<tr><td>location.replace(), cross-site source</td><td class="num">3</td>
+<td><strong><code>same-origin</code></strong></td><td><strong>cross-site</strong></td></tr>
+</tbody>
+</table>
+
+<p>Six navigations that began on a different site are reported to the destination as
+<code>same-origin</code>. Any defence that trusts <code>Sec-Fetch-Site: same-origin</code> as
+"this request came from my own pages" is defeated by a client-side redirect — the CSRF-shaped
+version of the same mistake. The inward hop is honestly labelled <code>cross-site</code>; it is
+the hop <em>after</em> it that is not.</p>
+
+<h3>Part B — the tag is what actually dies</h3>
+
+<p>None of the above loses the campaign attribution, because attribution usually does not read
+the header. It reads <code>utm_source</code> off the URL. So the second experiment holds the
+chain fixed at one 301 and varies only what the redirect does to the URL:</p>
+
+<table>
+<thead><tr><th>What the 301 does</th><th>UTM on landing</th><th><code>utm_campaign</code> seen</th>
+<th><code>document.referrer</code> recovers it?</th></tr></thead>
+<tbody>
+<tr><td>forwards the query string</td><td>yes</td><td><code>chain</code></td><td>n/a</td></tr>
+<tr><td>redirects to a bare path</td><td><strong>no</strong></td><td><em>none</em></td><td><strong>no</strong></td></tr>
+<tr><td>redirects with a rewritten campaign</td><td>yes</td><td><code>rewritten</code></td><td><strong>no</strong></td></tr>
+<tr><td>redirects to a clean canonical URL</td><td><strong>no</strong></td><td><em>none</em></td><td><strong>no</strong></td></tr>
+</tbody>
+</table>
+
+<p>The referrer cannot substitute, and the reason is structural rather than a limitation of any
+one browser: <code>document.referrer</code> at the landing page is the
+<em>intermediate</em> URL, not the original link. When the intermediate dropped the tags, the
+only record of them was in a URL the destination will never see. Attribution that depends on
+query parameters is therefore exactly as reliable as the weakest redirect in the chain, and
+"clean URL" redirects — which are usually added deliberately, for good reasons — silently break
+it.</p>
+
+<p>There is one shape that survives. If the tag lives in the <em>path</em> rather than the
+query, a redirect that rewrites only the query keeps it, and the destination can still
+attribute the visit:</p>
+
+<table>
+<thead><tr><th>Tag carried as</th><th>301 rewrite</th><th>Tag on landing</th>
+<th>Attributable from URL</th></tr></thead>
+<tbody>
+<tr><td><code>?utm_source=…&amp;utm_campaign=…</code></td><td>path rewritten, query dropped</td>
+<td><strong>lost</strong></td><td>no</td></tr>
+<tr><td><code>/promo/nhip78/referral/chain</code></td><td>query dropped, path preserved</td>
+<td><strong>intact</strong></td><td><strong>yes</strong></td></tr>
+</tbody>
+</table>
+
+<h3>The 4,096-byte ceiling, measured to the byte</h3>
+
+<p>One more way the referrer disappears without any redirect misbehaving: it is length-capped.
+The fetch specification says a URL whose referrer would exceed 4,096 bytes is replaced by its
+origin, and Chrome implements that literally. Sweeping a source path from 3,900 to 4,300 bytes
+in 25-byte steps, the transition is one step wide:</p>
+
+<table>
+<thead><tr><th>Referrer URL length</th><th>Header received</th><th>Path visible to destination</th></tr></thead>
+<tbody>
+<tr><td>4,097 bytes</td><td>4,096 bytes, full path</td><td><strong>intact</strong></td></tr>
+<tr><td>4,122 bytes</td><td>22 bytes — <code>http://127.0.0.1:8901/</code></td>
+<td><strong>gone</strong></td></tr>
+</tbody>
+</table>
+
+<p>It is not truncation. Nothing is cut, no ellipsis is appended, and no partial path arrives;
+the value collapses to the origin, exactly as the spec describes. So a page with a long query
+string — a filtered search, a deeply parameterised CMS route — sends a referrer that identifies
+its host and nothing else, and the destination has no way to tell that from a page that chose
+<code>origin</code> deliberately. The failure is silent on both ends.</p>
+
+<h3>What I got wrong measuring this</h3>
+
+<p>Three of my first four runs were invalid, and the reasons are worth recording because each
+one produced plausible numbers:</p>
+
+<ul>
+  <li><strong>v1</strong> put the <code>meta refresh</code> on the <em>source</em> document.
+  The source navigated itself before the click could be dispatched, so six rows recorded a
+  navigation that never involved a link. The fix was to move every auto-navigating element onto
+  an intermediate document.</li>
+  <li><strong>v2</strong> classified <code>document.referrer === ""</code> as "origin".
+  An empty string is not an origin; it is absence. Six rows were reported as leaking an origin
+  they never sent.</li>
+  <li><strong>v2</strong> also under-counted hops, because 301 responses are cacheable and
+  Chrome reused the cached redirect — a three-hop chain logged two hops. Fixed with
+  <code>Cache-Control: no-store</code> and a unique nonce per click; the server's own hop count
+  is the authority, not the navigation timing.</li>
+  <li><strong>v3</strong> reused a single tab across 60 navigations and <code>Page.navigate</code>
+  wedged on the second click. A fresh tab per row fixed it, which is why the reproduction below
+  opens and closes one tab per measurement.</li>
+</ul>
+
+<h3>Reproducing it</h3>
+
+<pre><code># one destination, one cross-site source, one third site
+python3 - &lt;&lt;'PY'
+import http.server, threading, sys, json
+sys.path.insert(0, "~/.hermes/scripts"); from cdp import Tab
+
+class H(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = self.path
+        if u.startswith("/r/"):                      # /r/&lt;code&gt;/&lt;rest&gt;?&lt;query&gt;
+            code = int(u.split("/")[2]); rest = u.split("/")[3:]
+            loc = ("/r/" + "/".join(rest) if rest[0] != "0" else "/final") \
+                  + "?" + u.split("?", 1)[1]
+            self.send_response(code); self.send_header("Location", loc)
+            self.send_header("Cache-Control", "no-store")   # or the hop is cached
+            self.send_header("Content-Length", "0"); self.end_headers(); return
+        if u.startswith("/final"):
+            print("landing saw referer:", self.headers.get("Referer"),
+                  "| sec-fetch-site:", self.headers.get("Sec-Fetch-Site"))
+        body = ('&lt;meta charset=utf-8&gt;&lt;a id=go style="display:block;padding:40px" '
+                'href="/r/301/0?x=1"&gt;go&lt;/a&gt;').encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(body)))
+        self.end_headers(); self.wfile.write(body)
+
+s = http.server.ThreadingHTTPServer(("127.0.0.1", 8901), H)
+threading.Thread(target=s.serve_forever, daemon=True).start()
+
+t = Tab("about:blank")
+t.goto("http://127.0.0.1:8901/src", wait=0.5)
+c = t.center_of("document.getElementById('go')"); t.click_at(c["x"], c["y"])
+print("document.referrer:", t.eval("document.referrer"))
+t.send("Page.close")
+PY
+
+# then repeat with Referrer-Policy: no-referrer on the source, and with
+# &lt;meta http-equiv="refresh"&gt; substituted for the 301</code></pre>
+
+<p>The links this cluster places use
+<code>?utm_source=githubpages&amp;utm_medium=referral</code>, which put the tag in the shape
+that a query-dropping redirect destroys and the 4,096-byte cap could erase. Both failure modes
+are absent here — the targets answer on their first response with no redirect hop, which is
+checked rather than assumed, because it is the only reason the tags arrive at all. If you are
+wiring up outbound links of your own and want the visit to survive an intermediary you do not
+control, <a href="https://upgolab.com/en/upscale?utm_source=githubpages&amp;utm_medium=referral&amp;utm_campaign=nofollow-notes">the upscale
+studio</a> is where these measurements get used; the tag shape is the part to copy.</p>
 
 <h2>What this changes about placing links</h2>
 
